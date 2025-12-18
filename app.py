@@ -68,6 +68,9 @@ def init_session_state():
     if 'data_loaded' not in st.session_state:
         st.session_state.data_loaded = False
 
+    if 'just_restored' not in st.session_state:
+        st.session_state.just_restored = False
+
 
 def reset_coding_state():
     """Reset coding state when meeting changes."""
@@ -135,6 +138,20 @@ def count_completed_decisions() -> int:
     )
 
 
+def find_first_incomplete_decision(total_decisions: int) -> int:
+    """Find the first incomplete decision index.
+
+    Returns:
+        Index of first incomplete decision (0-based), or -1 if all complete.
+    """
+    for idx in range(total_decisions):
+        if idx not in st.session_state.decision_validations:
+            return idx
+        if not st.session_state.decision_validations[idx].get('completed', False):
+            return idx
+    return -1  # All complete
+
+
 def restore_from_uploaded_json(uploaded_file):
     """Restore coding progress from an uploaded JSON file."""
     try:
@@ -171,7 +188,13 @@ def restore_from_uploaded_json(uploaded_file):
             'general_notes': ''
         })
 
-        return True, f"Restored progress for meeting {meeting_date}"
+        # Mark that we just restored so we can show progress info
+        st.session_state.just_restored = True
+
+        completed = sum(1 for v in st.session_state.decision_validations.values() if v.get('completed', False))
+        total = len(data.get('decision_validations', []))
+
+        return True, f"Restored progress: {completed}/{total} decisions completed"
 
     except json.JSONDecodeError:
         return False, "Invalid JSON file"
@@ -268,7 +291,11 @@ def render_sidebar():
                 if completed == total_decisions:
                     st.success("All decisions validated!")
                 else:
-                    st.info("In Progress")
+                    next_incomplete = find_first_incomplete_decision(total_decisions)
+                    if next_incomplete >= 0:
+                        st.info(f"▶️ Next: **Decision {next_incomplete + 1}**")
+                    else:
+                        st.info("In Progress")
 
             st.divider()
 
@@ -917,6 +944,17 @@ def main():
     if decisions_df is None:
         st.error(f"Could not load decisions for meeting {ymd}")
         return
+
+    # Show toast notification after restore
+    if st.session_state.just_restored:
+        st.session_state.just_restored = False
+        completed = count_completed_decisions()
+        total = len(decisions_df)
+        next_incomplete = find_first_incomplete_decision(total)
+        if next_incomplete >= 0:
+            st.toast(f"Restored! {completed}/{total} done. Continue with Decision {next_incomplete + 1}", icon="📂")
+        else:
+            st.toast(f"Restored! All {total} decisions completed.", icon="✅")
 
     # Render meeting overview
     render_meeting_overview(ymd, decisions_df)
