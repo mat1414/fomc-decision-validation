@@ -135,6 +135,50 @@ def count_completed_decisions() -> int:
     )
 
 
+def restore_from_uploaded_json(uploaded_file):
+    """Restore coding progress from an uploaded JSON file."""
+    try:
+        content = uploaded_file.read().decode('utf-8')
+        data = json.loads(content)
+
+        # Extract metadata
+        metadata = data.get('metadata', {})
+        meeting_date = metadata.get('meeting_date')
+        coder_id = metadata.get('coder_id')
+
+        if not meeting_date or meeting_date not in TARGET_MEETINGS:
+            return False, "Invalid or unsupported meeting date in file"
+
+        # Set the coder ID and meeting
+        st.session_state.coder_id = coder_id
+        st.session_state.selected_meeting = meeting_date
+
+        # Reset and restore decision validations
+        st.session_state.decision_validations = {}
+        for val in data.get('decision_validations', []):
+            idx = val.get('decision_index')
+            if idx is not None:
+                st.session_state.decision_validations[idx] = val
+
+        # Restore missing decisions
+        st.session_state.missing_decisions = data.get('missing_decisions', [])
+
+        # Restore meeting summary
+        st.session_state.meeting_summary = data.get('meeting_summary', {
+            'all_decisions_complete': False,
+            'missing_check_complete': False,
+            'overall_assessment': None,
+            'general_notes': ''
+        })
+
+        return True, f"Restored progress for meeting {meeting_date}"
+
+    except json.JSONDecodeError:
+        return False, "Invalid JSON file"
+    except Exception as e:
+        return False, f"Error loading file: {str(e)}"
+
+
 def render_sidebar():
     """Render the sidebar with coder ID, meeting selection, and progress."""
     with st.sidebar:
@@ -149,6 +193,26 @@ def render_sidebar():
 
         if coder_id != st.session_state.coder_id:
             st.session_state.coder_id = coder_id
+
+        st.divider()
+
+        # Resume previous work section
+        st.header("Resume Previous Work")
+
+        uploaded_file = st.file_uploader(
+            "Upload saved progress (JSON)",
+            type=['json'],
+            help="Upload a previously downloaded JSON file to continue where you left off"
+        )
+
+        if uploaded_file is not None:
+            if st.button("📂 Restore Progress", use_container_width=True):
+                success, message = restore_from_uploaded_json(uploaded_file)
+                if success:
+                    st.success(message)
+                    st.rerun()
+                else:
+                    st.error(message)
 
         st.divider()
 
