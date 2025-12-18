@@ -6,6 +6,7 @@ from Federal Reserve FOMC meeting transcripts.
 """
 import streamlit as st
 import pandas as pd
+import json
 from datetime import datetime
 
 from config import (
@@ -208,39 +209,46 @@ def render_sidebar():
             st.divider()
 
             # Export buttons
-            st.header("Export")
+            st.header("Download Results")
 
-            col1, col2 = st.columns(2)
+            if st.session_state.coder_id:
+                json_data, json_filename = generate_results_json()
+                csv_data, csv_filename = generate_results_csv()
 
-            with col1:
-                if st.button("Save Progress", use_container_width=True):
-                    if not st.session_state.coder_id:
-                        st.error("Please enter Coder ID")
-                    else:
-                        save_results()
+                if json_data:
+                    st.download_button(
+                        label="📥 Download JSON",
+                        data=json_data,
+                        file_name=json_filename,
+                        mime="application/json",
+                        use_container_width=True
+                    )
 
-            with col2:
-                if st.button("Export CSV", use_container_width=True):
-                    if not st.session_state.coder_id:
-                        st.error("Please enter Coder ID")
-                    else:
-                        export_results_csv()
+                if csv_data:
+                    st.download_button(
+                        label="📥 Download CSV",
+                        data=csv_data,
+                        file_name=csv_filename,
+                        mime="text/csv",
+                        use_container_width=True
+                    )
+            else:
+                st.info("Enter Coder ID to enable downloads")
 
 
-def save_results():
-    """Save current coding results to JSON."""
+def generate_results_json():
+    """Generate coding results as JSON string."""
     ymd = st.session_state.selected_meeting
     coder_id = st.session_state.coder_id
 
     decisions_df = load_decisions(ymd)
     if decisions_df is None:
-        st.error("Could not load decisions")
-        return
+        return None, None
 
     # Build decision validations list
     validations = []
     for idx, row in decisions_df.iterrows():
-        val = get_validation_for_decision(idx)
+        val = get_validation_for_decision(idx).copy()
         val['claude_description'] = row['description']
         val['claude_type'] = row['type']
         val['claude_score'] = int(row['score'])
@@ -252,52 +260,115 @@ def save_results():
     stats = get_transcript_stats(ymd, transcripts_df)
     alternatives = load_alternatives(ymd, load_alternatives_df())
 
-    metadata = {
-        'transcript_word_count': stats['word_count'],
-        'num_decisions_claude': len(decisions_df),
-        'alternatives_available': len(alternatives) > 0
+    output = {
+        "metadata": {
+            "meeting_date": ymd,
+            "coder_id": coder_id,
+            "coding_timestamp": datetime.now().isoformat(),
+            "app_version": "1.0",
+            "transcript_word_count": stats['word_count'],
+            "num_decisions_claude": len(decisions_df),
+            "alternatives_available": len(alternatives) > 0
+        },
+        "decision_validations": validations,
+        "missing_decisions": st.session_state.missing_decisions,
+        "meeting_summary": st.session_state.meeting_summary
     }
 
-    filepath = save_coding_results(
-        ymd=ymd,
-        coder_id=coder_id,
-        decision_validations=validations,
-        missing_decisions=st.session_state.missing_decisions,
-        meeting_summary=st.session_state.meeting_summary,
-        metadata=metadata
-    )
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"decisions_{ymd}_{coder_id}_{timestamp}.json"
 
-    st.sidebar.success(f"Saved to {filepath}")
+    return json.dumps(output, indent=2, ensure_ascii=False), filename
 
 
-def export_results_csv():
-    """Export results to CSV."""
+def generate_results_csv():
+    """Generate coding results as CSV string."""
     ymd = st.session_state.selected_meeting
     coder_id = st.session_state.coder_id
 
     decisions_df = load_decisions(ymd)
     if decisions_df is None:
-        st.error("Could not load decisions")
-        return
+        return None, None
 
-    validations = []
+    rows = []
+
+    # Add validated decisions
     for idx, row in decisions_df.iterrows():
         val = get_validation_for_decision(idx)
-        val['claude_description'] = row['description']
-        val['claude_type'] = row['type']
-        val['claude_score'] = int(row['score'])
-        val['claude_justification'] = row.get('justification', '')
-        validations.append(val)
+        csv_row = {
+            "meeting_date": ymd,
+            "coder_id": coder_id,
+            "coding_timestamp": datetime.now().isoformat(),
+            "record_type": "validated_decision",
+            "decision_index": val.get("decision_index"),
+            "claude_description": row['description'],
+            "claude_type": row['type'],
+            "claude_score": int(row['score']),
+            "claude_justification": row.get('justification', ''),
+            "human_occurred": val.get("human_occurred"),
+            "human_corrected_description": val.get("human_corrected_description"),
+            "human_type_agree": val.get("human_type_agree"),
+            "human_type_override": val.get("human_type_override"),
+            "human_score": val.get("human_score"),
+            "human_evidence": val.get("human_evidence"),
+            "human_notes": val.get("human_notes"),
+            "human_confidence": val.get("human_confidence"),
+            "completed": val.get("completed")
+        }
+        rows.append(csv_row)
 
-    filepath = export_to_csv(
-        ymd=ymd,
-        coder_id=coder_id,
-        decision_validations=validations,
-        missing_decisions=st.session_state.missing_decisions,
-        meeting_summary=st.session_state.meeting_summary
-    )
+    # Add missing decisions
+    for i, missing in enumerate(st.session_state.missing_decisions):
+        csv_row = {
+            "meeting_date": ymd,
+            "coder_id": coder_id,
+            "coding_timestamp": datetime.now().isoformat(),
+            "record_type": "missing_decision",
+            "decision_index": f"missing_{i+1}",
+            "claude_description": None,
+            "claude_type": None,
+            "claude_score": None,
+            "claude_justification": None,
+            "human_occurred": "missing",
+            "human_corrected_description": missing.get("description"),
+            "human_type_agree": None,
+            "human_type_override": missing.get("type"),
+            "human_score": missing.get("score"),
+            "human_evidence": missing.get("evidence"),
+            "human_notes": missing.get("notes"),
+            "human_confidence": missing.get("confidence"),
+            "completed": True
+        }
+        rows.append(csv_row)
 
-    st.sidebar.success(f"Exported to {filepath}")
+    # Add summary row
+    summary_row = {
+        "meeting_date": ymd,
+        "coder_id": coder_id,
+        "coding_timestamp": datetime.now().isoformat(),
+        "record_type": "meeting_summary",
+        "decision_index": None,
+        "claude_description": None,
+        "claude_type": None,
+        "claude_score": None,
+        "claude_justification": None,
+        "human_occurred": None,
+        "human_corrected_description": None,
+        "human_type_agree": None,
+        "human_type_override": None,
+        "human_score": None,
+        "human_evidence": None,
+        "human_notes": st.session_state.meeting_summary.get("general_notes"),
+        "human_confidence": st.session_state.meeting_summary.get("overall_assessment"),
+        "completed": st.session_state.meeting_summary.get("all_decisions_complete")
+    }
+    rows.append(summary_row)
+
+    df = pd.DataFrame(rows)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"decisions_{ymd}_{coder_id}_{timestamp}.csv"
+
+    return df.to_csv(index=False), filename
 
 
 def render_meeting_overview(ymd: str, decisions_df: pd.DataFrame):
@@ -692,21 +763,53 @@ def render_meeting_summary_section(decisions_df: pd.DataFrame):
     # Check if all decisions complete
     st.session_state.meeting_summary['all_decisions_complete'] = (completed == total)
 
-    # Submit button
+    # Submit section
     st.markdown("---")
+    st.subheader("📤 Submit & Download Results")
 
-    if st.button("📤 SUBMIT MEETING VALIDATION", type="primary", use_container_width=True):
-        if not st.session_state.coder_id:
-            st.error("Please enter your Coder ID in the sidebar")
-        elif completed < total:
-            st.warning(f"Only {completed} of {total} decisions validated. Please complete all decisions.")
-        elif st.session_state.meeting_summary.get('overall_assessment') is None:
-            st.error("Please select an overall assessment")
-        else:
-            save_results()
-            export_results_csv()
-            st.success("Meeting validation submitted successfully!")
-            st.balloons()
+    # Validation checks
+    ready_to_submit = True
+    if not st.session_state.coder_id:
+        st.error("Please enter your Coder ID in the sidebar")
+        ready_to_submit = False
+    elif completed < total:
+        st.warning(f"Only {completed} of {total} decisions validated. Please complete all decisions.")
+        ready_to_submit = False
+    elif st.session_state.meeting_summary.get('overall_assessment') is None:
+        st.error("Please select an overall assessment above")
+        ready_to_submit = False
+
+    if ready_to_submit:
+        st.success("✅ All validations complete! Download your results below:")
+
+        json_data, json_filename = generate_results_json()
+        csv_data, csv_filename = generate_results_csv()
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            if json_data:
+                st.download_button(
+                    label="📥 Download JSON",
+                    data=json_data,
+                    file_name=json_filename,
+                    mime="application/json",
+                    use_container_width=True,
+                    type="primary"
+                )
+
+        with col2:
+            if csv_data:
+                st.download_button(
+                    label="📥 Download CSV",
+                    data=csv_data,
+                    file_name=csv_filename,
+                    mime="text/csv",
+                    use_container_width=True,
+                    type="primary"
+                )
+
+        st.balloons()
 
 
 def main():
