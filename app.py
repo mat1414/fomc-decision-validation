@@ -218,10 +218,17 @@ def render_sidebar():
             for ymd, info in TARGET_MEETINGS.items()
         }
 
+        # Calculate current index based on session state
+        current_index = None
+        if st.session_state.selected_meeting:
+            meeting_keys = list(meeting_options.keys())
+            if st.session_state.selected_meeting in meeting_keys:
+                current_index = meeting_keys.index(st.session_state.selected_meeting)
+
         selected_display = st.selectbox(
             "Select Meeting",
             options=list(meeting_options.values()),
-            index=None,
+            index=current_index,
             placeholder="Choose a meeting to validate..."
         )
 
@@ -233,13 +240,12 @@ def render_sidebar():
                     selected_ymd = ymd
                     break
 
-        # Handle meeting change
+        # Handle meeting change (only reset if actually changing to a different meeting)
         if selected_ymd != st.session_state.selected_meeting:
-            st.session_state.selected_meeting = selected_ymd
-            if selected_ymd:
+            # Only reset if switching TO a new meeting, not when restoring
+            if selected_ymd and st.session_state.selected_meeting != selected_ymd:
                 reset_coding_state()
-                # Note: We no longer auto-load from filesystem since it's unreliable
-                # on Streamlit Cloud. Users should use JSON upload to restore progress.
+            st.session_state.selected_meeting = selected_ymd
 
         st.divider()
 
