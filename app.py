@@ -29,8 +29,7 @@ from utils.data_loader import (
 )
 from utils.export import (
     save_coding_results,
-    export_to_csv,
-    load_existing_results
+    export_to_csv
 )
 
 
@@ -82,34 +81,6 @@ def reset_coding_state():
         'overall_assessment': None,
         'general_notes': ''
     }
-
-
-def load_existing_coding():
-    """Load existing coding results if available."""
-    if st.session_state.coder_id and st.session_state.selected_meeting:
-        existing = load_existing_results(
-            st.session_state.selected_meeting,
-            st.session_state.coder_id
-        )
-        if existing:
-            # Restore decision validations
-            for val in existing.get('decision_validations', []):
-                idx = val.get('decision_index')
-                if idx is not None:
-                    st.session_state.decision_validations[idx] = val
-
-            # Restore missing decisions
-            st.session_state.missing_decisions = existing.get('missing_decisions', [])
-
-            # Restore meeting summary
-            st.session_state.meeting_summary = existing.get('meeting_summary', {
-                'all_decisions_complete': False,
-                'missing_check_complete': False,
-                'overall_assessment': None,
-                'general_notes': ''
-            })
-            return True
-    return False
 
 
 def get_validation_for_decision(decision_idx: int) -> dict:
@@ -267,9 +238,8 @@ def render_sidebar():
             st.session_state.selected_meeting = selected_ymd
             if selected_ymd:
                 reset_coding_state()
-                # Try to load existing results
-                if load_existing_coding():
-                    st.info("Loaded existing coding progress")
+                # Note: We no longer auto-load from filesystem since it's unreliable
+                # on Streamlit Cloud. Users should use JSON upload to restore progress.
 
         st.divider()
 
